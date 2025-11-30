@@ -1,0 +1,386 @@
+/**
+ * File: Code.gs
+ * Description: Backend logic for Login, Signup, and Inventory Submission (Multi-Toko), and Admin User Management.
+ * Note: Deploy this script as a Web App (Akses: Anyone, even anonymously) to get the SCRIPT_URL.
+ */
+
+// ==========================================================
+// PENTING: GANTI KONSTANTA INI
+// ==========================================================
+const MASTER_SS_ID = '1sBm5-OuQCHy_p4v4S46f2AMvpzbSKQS4XPQbdolJ29s'; // Ganti dengan ID Spreadsheet Master Anda
+const SHEET_TOKO_NAME = 'TOKO';
+const SHEET_USER_NAME = 'USER';
+const SHEET_TRANSAKSI_NAME = 'HASIL INPUT'; 
+
+// KONSTANTA BATASAN
+const MAX_MASTER_ADMIN = 2;
+const MAX_SUB_ADMIN_PER_TOKO = 2;
+
+// ==========================================================
+// UTILITY FUNCTIONS (Output JSON Responses)
+// ==========================================================
+
+function createSuccessOutput(message, data = {}) {
+  return ContentService.createTextOutput(JSON.stringify({
+    status: 'success',
+    message: message,
+    ...data
+  }))
+  .setMimeType(ContentService.MimeType.JSON);
+}
+
+function createErrorOutput(message, code = 400) {
+  return ContentService.createTextOutput(JSON.stringify({
+    status: 'error',
+    code: code,
+    message: message
+  }))
+  .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ==========================================================
+// CORE WEB APP ENTRY POINT (doPost)
+// ==========================================================
+
+function doPost(e) {
+  try {
+    const payload = e.parameter; 
+    const action = payload.action;
+    
+    switch (action) {
+      case 'login':
+        return handleLogin(payload);
+      case 'saveSignup':
+        return handleSignup(payload);
+      case 'saveInventory':
+        return saveInventory(payload);
+      
+      case 'getAdminUsers':
+        return getAdminUsers(payload);
+      case 'updateUserStatus':
+        return updateUserStatus(payload);
+
+      default:
+        return createErrorOutput('Aksi tidak valid.', 400);
+    }
+    
+  } catch (error) {
+    Logger.log('Server Error: ' + error.message);
+    return createErrorOutput('Terjadi kesalahan server: ' + error.message, 500);
+  }
+}
+
+// ==========================================================
+// LOGIC HANDLERS
+// ==========================================================
+
+/**
+ * Logic Pendaftaran User (Selalu PENDING).
+ */
+function handleSignup(payload) {
+  const { nama, toko } = payload;
+  const masterSS = SpreadsheetApp.openById(MASTER_SS_ID);
+  const usersSheet = masterSS.getSheetByName(SHEET_USER_NAME);
+
+  if (!usersSheet) {
+    throw new Error('Sheet USERS tidak ditemukan.');
+  }
+
+  const isDuplicate = usersSheet.getDataRange().getValues()
+    .slice(1) 
+    .some(row => row[0] === nama && row[1] === toko);
+
+  if (isDuplicate) {
+    return createErrorOutput('Anda sudah pernah mengajukan pendaftaran untuk toko ini. Silakan cek status Anda di halaman Login.', 409);
+  }
+
+  const newRow = [
+    nama, 
+    toko, 
+    new Date(), 
+    'PENDING' 
+  ];
+  
+  usersSheet.appendRow(newRow);
+
+  return createSuccessOutput('Permohonan pendaftaran Anda berhasil terkirim. Akun Anda berstatus PENDING, harap tunggu persetujuan Admin.', { user: { nama, toko } });
+}
+
+
+/**
+ * Logic Login User.
+ */
+function handleLogin(payload) {
+  const { nama, toko } = payload;
+  const masterSS = SpreadsheetApp.openById(MASTER_SS_ID);
+  const usersSheet = masterSS.getSheetByName(SHEET_USER_NAME);
+  const tokoSheet = masterSS.getSheetByName(SHEET_TOKO_NAME);
+
+  if (!usersSheet || !tokoSheet) {
+    throw new Error('Konfigurasi sheet master tidak lengkap (USERS/TOKO).');
+  }
+
+  const dataValues = usersSheet.getDataRange().getValues();
+  const userRow = dataValues.slice(1).find(row => row[0] === nama && row[1] === toko);
+
+  if (!userRow) {
+    return createErrorOutput('Nama pengguna atau Toko tidak ditemukan dalam sistem. Harap pastikan data yang Anda masukkan benar atau segera lakukan Pendaftaran.', 401);
+  }
+  
+  const userStatus = userRow[3] ? userRow[3].toString().toUpperCase().trim() : ''; 
+  
+  const ALLOWED_STATUSES = ['AKTIF', 'SUB_ADMIN', 'MASTER'];
+
+  if (!ALLOWED_STATUSES.includes(userStatus)) {
+    const statusMessage = userStatus === 'PENDING' ? 
+      "Status akun Anda adalah PENDING. Akses ditolak sampai Admin mengaktifkannya." :
+      `Status akun Anda: ${userStatus}. Akses ditolak. Harap hubungi Admin Toko untuk peninjauan.`;
+      
+    return createErrorOutput(statusMessage, 403);
+  }
+
+  const tokoConfigRow = tokoSheet.getDataRange().getValues()
+    .find(row => row[0] === toko);
+  
+  if (!tokoConfigRow || !tokoConfigRow[1]) {
+    return createErrorOutput('Toko ini belum dikonfigurasi dengan ID Spreadsheet tujuan. Harap hubungi administrator sistem.', 401);
+  }
+
+  const ssIdToko = tokoConfigRow[1]; 
+  
+  return createSuccessOutput('Login berhasil!', {
+    user: { 
+      nama: nama, 
+      toko: toko, 
+      status: userStatus, 
+      ssId: ssIdToko 
+    }
+  });
+}
+
+/**
+ * Mendapatkan daftar pengguna, difilter berdasarkan otorisasi admin.
+ */
+function getAdminUsers(payload) {
+  const { toko: adminToko, isAdminMaster: isAdminMasterString } = payload;
+  const isAdminMaster = isAdminMasterString === 'true';
+
+  const masterSS = SpreadsheetApp.openById(MASTER_SS_ID);
+  const usersSheet = masterSS.getSheetByName(SHEET_USER_NAME);
+  const tokoSheet = masterSS.getSheetByName(SHEET_TOKO_NAME);
+
+  if (!usersSheet || !tokoSheet) {
+    return createErrorOutput('Sheet USERS atau TOKO tidak ditemukan.', 404);
+  }
+
+  const dataValues = usersSheet.getDataRange().getValues();
+  if (dataValues.length <= 1) {
+    return createSuccessOutput('Daftar pengguna kosong.', { users: [], tokoList: [] });
+  }
+
+  const allTokoList = tokoSheet.getDataRange().getValues().slice(1).map(row => row[0]);
+  
+  const filteredUsers = dataValues.slice(1).filter(row => {
+    const userToko = row[1];
+    if (isAdminMaster) {
+      return true;
+    }
+    return userToko === adminToko;
+  });
+
+  const usersData = filteredUsers.map(row => {
+    const date = row[2] instanceof Date ? Utilities.formatDate(row[2], Session.getScriptTimeZone(), 'dd-MM-yyyy') : (row[2] || 'N/A');
+    return {
+      nama: row[0],
+      toko: row[1],
+      tanggal: date,
+      status: row[3] ? row[3].toString().toUpperCase().trim() : 'N/A'
+    };
+  });
+
+  const relevantTokoList = isAdminMaster ? allTokoList : allTokoList.filter(toko => toko === adminToko);
+
+  return createSuccessOutput('Daftar pengguna berhasil dimuat.', { 
+    users: usersData,
+    tokoList: relevantTokoList
+  });
+}
+
+/**
+ * Menyimpan perubahan status pengguna dari Admin Panel dengan verifikasi otoritas dan kuota.
+ */
+function updateUserStatus(payload) {
+  const { updates: updatesJson, tokoAdmin: adminToko, isAdminMaster: isAdminMasterString } = payload;
+  const isAdminMaster = isAdminMasterString === 'true';
+
+  if (!updatesJson) {
+    return createErrorOutput('Data perubahan status tidak ditemukan.', 400);
+  }
+
+  const updates = JSON.parse(updatesJson);
+  if (updates.length === 0) {
+    return createSuccessOutput('Tidak ada perubahan status yang perlu disimpan.');
+  }
+
+  const masterSS = SpreadsheetApp.openById(MASTER_SS_ID);
+  const usersSheet = masterSS.getSheetByName(SHEET_USER_NAME);
+
+  if (!usersSheet) {
+    return createErrorOutput('Sheet USER tidak ditemukan.', 404);
+  }
+
+  const dataValues = usersSheet.getDataRange().getValues();
+  let changesCount = 0;
+  let unauthorizedChanges = 0;
+  let quotaErrors = [];
+  
+  // --- A. Hitung Kuota Saat Ini (Termasuk perubahan yang diusulkan) ---
+  let masterCount = 0;
+  let subAdminCounts = {}; 
+
+  const proposedChanges = updates.reduce((acc, curr) => {
+    acc[`${curr.nama}|${curr.toko}`] = curr.newStatus;
+    return acc;
+  }, {});
+
+  for (let i = 1; i < dataValues.length; i++) {
+    const row = dataValues[i];
+    const nama = row[0];
+    const toko = row[1];
+    let status = row[3] ? row[3].toString().toUpperCase().trim() : 'N/A';
+    
+    const key = `${nama}|${toko}`;
+    if (proposedChanges[key]) {
+      status = proposedChanges[key];
+    }
+
+    if (status === 'MASTER') {
+      masterCount++;
+    } else if (status === 'SUB_ADMIN') {
+      subAdminCounts[toko] = (subAdminCounts[toko] || 0) + 1;
+    }
+  }
+
+  // --- B. Verifikasi Kuota Global Sebelum Menerapkan Perubahan ---
+  
+  if (masterCount > MAX_MASTER_ADMIN) {
+      quotaErrors.push(`Gagal. Jumlah Master Admin melebihi batas maksimal (${MAX_MASTER_ADMIN} orang). Batalkan perubahan status ke MASTER.`);
+  }
+  
+  for (const toko in subAdminCounts) {
+      if (subAdminCounts[toko] > MAX_SUB_ADMIN_PER_TOKO) {
+          quotaErrors.push(`Gagal. Toko "${toko}" memiliki Sub Admin lebih dari batas maksimal (${MAX_SUB_ADMIN_PER_TOKO} orang). Batalkan perubahan status ke SUB_ADMIN.`);
+      }
+  }
+
+  if (quotaErrors.length > 0) {
+      return createErrorOutput(quotaErrors.join(' | '));
+  }
+  
+  // --- C. Terapkan Perubahan (Setelah Lulus Kuota) ---
+  
+  updates.forEach(update => {
+    const { nama, toko, newStatus } = update;
+    
+    // Admin Toko tidak boleh mengubah status ke MASTER
+    if (!isAdminMaster && newStatus === 'MASTER') {
+       unauthorizedChanges++;
+       return; 
+    }
+    
+    // Admin Toko hanya boleh mengubah pengguna di toko mereka
+    if (!isAdminMaster && toko !== adminToko) {
+      unauthorizedChanges++;
+      return; 
+    }
+    
+    // Admin Toko tidak boleh mengubah pengguna MASTER (kecuali diri sendiri)
+    const originalRow = dataValues.slice(1).find(row => row[0] === nama && row[1] === toko);
+    if (originalRow && originalRow[3].toString().toUpperCase().trim() === 'MASTER' && !isAdminMaster) {
+         unauthorizedChanges++;
+         return; 
+    }
+
+    const rowIndex = dataValues.findIndex((row, index) => 
+      index > 0 && row[0] === nama && row[1] === toko
+    );
+
+    if (rowIndex > 0) {
+      const ssRow = rowIndex + 1; 
+      const currentStatus = dataValues[rowIndex][3];
+
+      if (currentStatus.toUpperCase().trim() !== newStatus.toUpperCase().trim()) {
+        usersSheet.getRange(ssRow, 4).setValue(newStatus); 
+        changesCount++;
+      }
+    }
+  });
+  
+  if (unauthorizedChanges > 0) {
+    return createErrorOutput(`Gagal menyimpan ${unauthorizedChanges} perubahan karena Anda tidak memiliki otoritas (mencoba mengubah status/akses di luar toko Anda atau mengubah status Master Admin).`, 403);
+  }
+
+  if (changesCount === 0) {
+    return createSuccessOutput('Tidak ada status yang benar-benar berubah di spreadsheet.');
+  }
+
+  return createSuccessOutput(`Berhasil memperbarui ${changesCount} status pengguna!`);
+}
+
+/**
+ * Menyimpan data inventaris ke Spreadsheet Toko.
+ */
+function saveInventory(payload) {
+  const { lokasi, barcode, qty, tanggal, user, toko } = payload;
+  
+  const masterSS = SpreadsheetApp.openById(MASTER_SS_ID);
+  const tokoSheet = masterSS.getSheetByName(SHEET_TOKO_NAME);
+  
+  const dataToko = tokoSheet.getDataRange().getValues().find(row => row[0] === toko);
+  
+  if (!dataToko || !dataToko[1]) {
+    return createErrorOutput(`Toko '${toko}' belum dikonfigurasi dengan ID Spreadsheet tujuan. Harap hubungi administrator sistem.`, 401);
+  }
+  
+  const ssIdToko = dataToko[1]; 
+
+  const tokoSS = SpreadsheetApp.openById(ssIdToko);
+  const targetSheet = tokoSS.getSheetByName(SHEET_TRANSAKSI_NAME); 
+  
+  if (!targetSheet) {
+    return createErrorOutput(`Sheet tujuan ('${SHEET_TRANSAKSI_NAME}') tidak ditemukan di Spreadsheet Toko: ${toko}`, 404);
+  }
+  
+  const newRow = [
+    lokasi,           
+    barcode,          
+    Number(qty),      
+    new Date(tanggal), 
+    user              
+  ];
+
+  targetSheet.appendRow(newRow);
+  
+  return createSuccessOutput('Data inventaris berhasil disimpan di Spreadsheet Toko!');
+}
+
+// Digunakan untuk mengambil daftar toko secara dinamis pada halaman login/signup
+function doGet(e) {
+    try {
+        const masterSS = SpreadsheetApp.openById(MASTER_SS_ID);
+        const tokoSheet = masterSS.getSheetByName(SHEET_TOKO_NAME);
+
+        if (!tokoSheet) {
+            return createErrorOutput('Sheet TOKO tidak ditemukan.', 404);
+        }
+
+        const tokoValues = tokoSheet.getDataRange().getValues();
+        const tokoList = tokoValues.slice(1).map(row => row[0]).filter(name => name); // Ambil nama toko dari kolom 1
+
+        return createSuccessOutput('Daftar toko berhasil diambil.', { tokoList: tokoList });
+        
+    } catch (error) {
+        Logger.log('Server Error (doGet): ' + error.message);
+        return createErrorOutput('Terjadi kesalahan server saat mengambil daftar toko: ' + error.message, 500);
+    }
+}
