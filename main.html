@@ -23,6 +23,7 @@
             --border-radius-small: 6px;
             --shadow-heavy: 0 8px 25px rgba(0, 0, 0, 0.2);
             --warning-color: #FF9800; /* Warna baru untuk kegagalan */
+            --so-color: #00BCD4; /* Warna baru untuk Stock Opname */
         }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Roboto', sans-serif; }
         body { 
@@ -56,11 +57,20 @@
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
+        
+        /* BARU: Container untuk menyejajarkan User Info dan Tombol SO */
+        .header-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 25px; 
+            gap: 10px; /* Jarak antara kotak info dan tombol */
+        }
+
         .user-info { 
             background-color: #E3F2FD; 
             padding: 15px; 
             border-radius: var(--border-radius-large); 
-            margin-bottom: 25px; 
             font-size: 0.9em; 
             color: var(--primary-color); 
             display: flex; 
@@ -68,6 +78,7 @@
             align-items: center; 
             font-weight: 500; 
             border-left: 5px solid var(--primary-color);
+            flex-grow: 1; /* Agar kotak info mengambil ruang sebanyak mungkin */
         }
         .user-info i { margin-right: 8px; }
         .user-info button { 
@@ -80,6 +91,29 @@
             transition: color 0.2s;
         }
         .user-info button:hover { color: #D32F2F; }
+
+        /* MODIFIKASI: Tombol Stock Opname kecil, terpisah, dan vertikal center */
+        #navSOButton {
+            background-color: var(--so-color); /* Warna baru untuk SO */
+            color: white;
+            border-radius: 8px;
+            padding: 15px 10px; /* Padding disesuaikan agar tombol vertikal sama tinggi dengan .user-info */
+            font-size: 0.85em; /* Ukuran font lebih kecil */
+            font-weight: 700;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            width: 70px; /* Lebar tetap agar proporsional */
+            line-height: 1;
+            text-align: center;
+            display: flex;
+            flex-direction: column; /* Ikon dan teks disusun vertikal */
+            align-items: center;
+        }
+        #navSOButton i {
+            margin-bottom: 5px; /* Jarak antara ikon dan teks */
+            font-size: 1.2em;
+        }
+        #navSOButton:hover { background-color: #00A3B5; transform: translateY(-1px); }
+
 
         /* --- 4. INPUT GROUP STYLE --- */
         .input-group { margin-bottom: 20px; }
@@ -110,12 +144,11 @@
             background-color: #FFFFFF;
         }
         
-        /* --- 5. SCANNER/BARCODE INPUT GROUP (Disesuaikan) --- */
+        /* --- 5. SCANNER/BARCODE INPUT GROUP --- */
         .input-with-icon { 
             display: flex; 
             align-items: stretch; 
         }
-        /* Input mengambil sebagian besar ruang */
         .input-with-icon input { 
             flex-grow: 1; 
             border-radius: 8px 0 0 8px; 
@@ -155,6 +188,11 @@
         .minus-btn:hover { background-color: #D32F2F; }
         .minus-btn.active:hover { background-color: #388E3C; }
 
+        /* --- 5.5. NAVIGATION BUTTONS (Hapus container yang tidak terpakai) --- */
+        .nav-buttons {
+            display: none; /* Sembunyikan container lama */
+        }
+        
         /* --- 6. SAVE BUTTON --- */
         .save-btn { 
             width: 100%; 
@@ -181,7 +219,7 @@
         }
         #adminPanelButton:hover { background-color: #E68A00; }
 
-        /* --- 8. SCANNER DISPLAY STYLE (Barcode Scanner) --- */
+        /* --- 8. SCANNER DISPLAY STYLE --- */
         .scanner-placeholder { 
             margin-top: 15px; 
             width: 100%; 
@@ -203,12 +241,10 @@
             position: relative;
         }
         
-        /* Hilangkan elemen UI bawaan html5-qrcode yang tidak diperlukan */
         .html5-qrcode-button-camera-start, .html5-qrcode-element {
             display: none !important;
         }
         
-        /* Pastikan video feed yang tampil di dalam #reader */
         #reader video {
             width: 100% !important;
             height: 100% !important;
@@ -257,9 +293,15 @@
     <div class="container">
         <img src="smart.jpg" alt="Logo Smart Swalayan" class="header-logo"> 
         
-        <div class="user-info">
-            <span id="userInfoText"><i class="fas fa-user-circle"></i> Memuat Sesi...</span>
-            <button id="logoutButton" title="Keluar"><i class="fas fa-sign-out-alt"></i></button>
+        <div class="header-row">
+            <div class="user-info">
+                <span id="userInfoText"><i class="fas fa-user-circle"></i> Memuat Sesi...</span>
+                <button id="logoutButton" title="Keluar"><i class="fas fa-sign-out-alt"></i></button>
+            </div>
+            <button id="navSOButton" class="nav-btn" title="Pindah ke Stock Opname">
+                <i class="fas fa-clipboard-check"></i> 
+                <span>SO</span>
+            </button>
         </div>
 
         <form id="inventoryForm">
@@ -318,7 +360,7 @@
             <p id="message" class="message"></p>
         </form>
         
-        <button id="adminPanelButton"><i class="fas fa-user-shield"></i>  PANEL ADMIN</button>
+        <button id="adminPanelButton"><i class="fas fa-user-shield"></i> PANEL ADMIN</button>
     </div>
 
     <script>
@@ -441,7 +483,7 @@
             try {
                 // Tampilkan pesan loading antrian hanya jika ada antrian lain
                 if (queue.length > 1) {
-                     displayMessage(`⏳ Mengirim 1 dari ${queue.length} transaksi...`, 'loading', 10000); 
+                    displayMessage(`⏳ Mengirim 1 dari ${queue.length} transaksi...`, 'loading', 10000); 
                 }
 
                 const response = await sendApiRequest('saveInventory', transactionToProcess);
@@ -501,7 +543,7 @@
                 });
                 
                 if (!response.ok && response.status >= 500) {
-                     throw new Error(`Server Error: Status ${response.status}`);
+                    throw new Error(`Server Error: Status ${response.status}`);
                 }
                 
                 const responseText = await response.text();
@@ -603,14 +645,14 @@
                     );
                     
                 } else {
-                     displayMessage('❌ Tidak ada kamera yang ditemukan.', 'error');
-                     stopBarcodeScanner();
+                    displayMessage('❌ Tidak ada kamera yang ditemukan.', 'error');
+                    stopBarcodeScanner();
                 }
             } catch (error) {
                 if (error.name === "NotAllowedError" || error.message.includes("Permission denied")) {
-                     displayMessage('❌ Akses kamera ditolak! Harap Izinkan Akses Kamera dan coba lagi.', 'error');
+                    displayMessage('❌ Akses kamera ditolak! Harap Izinkan Akses Kamera dan coba lagi.', 'error');
                 } else {
-                     displayMessage('❌ Gagal memulai kamera: ' + error.message, 'error');
+                    displayMessage('❌ Gagal memulai kamera: ' + error.message, 'error');
                 }
                 console.error("Gagal memulai Barcode Scanner:", error);
                 stopBarcodeScanner();
@@ -712,6 +754,12 @@
             ADMIN_PANEL_BUTTON.addEventListener('click', () => {
                 stopBarcodeScanner(); 
                 window.location.href = './admin.html';
+            });
+
+            // TOMBOL NAVIGASI BARU
+            document.getElementById('navSOButton').addEventListener('click', () => {
+                stopBarcodeScanner();
+                window.location.href = './so.html';
             });
 
             // Mulai proses antrian saat aplikasi dimuat
