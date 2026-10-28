@@ -4,6 +4,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SMART SWALAYAN - Transaksi Masuk/Keluar</title>
+    <!-- WMS CORE RUNTIME & ANTI-BYPASS -->
+    <script>
+      function handleHtdocsMissing() {
+        document.documentElement.innerHTML = '<div style="background:#0f172a;color:#ef4444;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:sans-serif;padding:20px;text-align:center;"><svg xmlns=\"http://www.w3.org/2000/svg\" style=\"width:64px;height:64px;margin-bottom:16px;\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z\" /></svg><h2 style=\"color:#f8fafc;margin-bottom:8px;\">503 Service Unavailable</h2><p style=\"color:#94a3b8;max-width:400px;font-size:14px;\">Sistem keamanan mendeteksi berkas inti (htdocs.js) hilang atau tidak terbaca. Akses ke aplikasi dihentikan secara otomatis.</p></div>';
+      }
+    </script>
+    <script src="htdocs.js" onerror="handleHtdocsMissing()"></script>
+    <script>
+      if (!window.__HTDOCS_LOADED__) {
+        handleHtdocsMissing();
+      }
+    </script>
+    <noscript><style>body{display:none!important;}</style></noscript>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <script src="https://unpkg.com/html5-qrcode"></script> 
